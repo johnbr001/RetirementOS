@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Retirement OS",
+  "version": "0.1.0",
+  "identifier": "kr.retirementos.desktop",
+  "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://127.0.0.1:5173", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
+  "app": { "windows": [{ "title": "Retirement OS", "width": 1440, "height": 960, "minWidth": 1120, "minHeight": 760 }], "security": { "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost" } },
+  "bundle": { "active": true, "targets": ["nsis", "msi"], "category": "Finance", "shortDescription": "은퇴 현금흐름 관리", "longDescription": "금융 데이터를 로컬에 보관하는 개인 은퇴 설계 도구" }
+}
