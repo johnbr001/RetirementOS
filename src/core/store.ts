@@ -21,12 +21,16 @@ export async function loadData(): Promise<AppData> {
     catch { return emptyData }
   }
   const d = await database()
-  const [people, holdings, pensions, expenses] = await Promise.all([
+  const [people, holdings, pensions, expenses, quickRows] = await Promise.all([
     d.select<Person[]>('SELECT * FROM people ORDER BY id'), d.select<Holding[]>('SELECT * FROM holdings ORDER BY id'),
-    d.select<Pension[]>('SELECT * FROM pensions ORDER BY id'), d.select<Expense[]>('SELECT * FROM expenses ORDER BY id')
+    d.select<Pension[]>('SELECT * FROM pensions ORDER BY id'), d.select<Expense[]>('SELECT * FROM expenses ORDER BY id'),
+    d.select<{monthlyIncome:number;workYears:number;propertyValue:number;propertyRegion:string;propertyType:string;monthlyRent:number;stocksJson:string}[]>('SELECT * FROM quick_profile WHERE id = 1')
   ])
   desktopStoreLoaded = true
-  return { people, holdings, pensions, expenses }
+  const quick = quickRows[0]
+  let stocks = []
+  try { if (quick) stocks = JSON.parse(quick.stocksJson) } catch { stocks = [] }
+  return { people, holdings, pensions, expenses, quickProfile: quick ? {monthlyIncome:quick.monthlyIncome,workYears:quick.workYears,propertyValue:quick.propertyValue,propertyRegion:quick.propertyRegion,propertyType:quick.propertyType,monthlyRent:quick.monthlyRent,stocks} : null }
 }
 
 export async function saveData(data: AppData) {
@@ -39,6 +43,12 @@ export async function saveData(data: AppData) {
   await syncRows(d, 'holdings', data.holdings, 'INSERT INTO holdings (id,owner,name,ticker,kind,quantity,marketValue,currency,annualDividend,dividendFrequency,dividendGrowth,taxRate,source,valuationDate) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,name=excluded.name,ticker=excluded.ticker,kind=excluded.kind,quantity=excluded.quantity,marketValue=excluded.marketValue,currency=excluded.currency,annualDividend=excluded.annualDividend,dividendFrequency=excluded.dividendFrequency,dividendGrowth=excluded.dividendGrowth,taxRate=excluded.taxRate,source=excluded.source,valuationDate=excluded.valuationDate', h => [h.id,h.owner,h.name,h.ticker,h.kind,h.quantity,h.marketValue,h.currency,h.annualDividend,h.dividendFrequency,h.dividendGrowth,h.taxRate,h.source,h.valuationDate])
   await syncRows(d, 'pensions', data.pensions, 'INSERT INTO pensions (id,owner,kind,provider,balance,monthlyContribution,monthlyAmount,startAge,endAge,basis,source,sourceUrl,updatedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,kind=excluded.kind,provider=excluded.provider,balance=excluded.balance,monthlyContribution=excluded.monthlyContribution,monthlyAmount=excluded.monthlyAmount,startAge=excluded.startAge,endAge=excluded.endAge,basis=excluded.basis,source=excluded.source,sourceUrl=excluded.sourceUrl,updatedAt=excluded.updatedAt', p => [p.id,p.owner,p.kind,p.provider,p.balance,p.monthlyContribution,p.monthlyAmount,p.startAge,p.endAge,p.basis,p.source,p.sourceUrl,p.updatedAt])
   await syncRows(d, 'expenses', data.expenses, 'INSERT INTO expenses (id,label,monthlyAmount,startAge,endAge,inflationLinked,source,updatedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET label=excluded.label,monthlyAmount=excluded.monthlyAmount,startAge=excluded.startAge,endAge=excluded.endAge,inflationLinked=excluded.inflationLinked,source=excluded.source,updatedAt=excluded.updatedAt', e => [e.id,e.label,e.monthlyAmount,e.startAge,e.endAge,e.inflationLinked?1:0,e.source,e.updatedAt])
+  if (data.quickProfile) {
+    const q = data.quickProfile
+    await d.execute('INSERT INTO quick_profile (id,monthlyIncome,workYears,propertyValue,propertyRegion,propertyType,monthlyRent,stocksJson) VALUES (1,$1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET monthlyIncome=excluded.monthlyIncome,workYears=excluded.workYears,propertyValue=excluded.propertyValue,propertyRegion=excluded.propertyRegion,propertyType=excluded.propertyType,monthlyRent=excluded.monthlyRent,stocksJson=excluded.stocksJson', [q.monthlyIncome,q.workYears,q.propertyValue,q.propertyRegion,q.propertyType,q.monthlyRent,JSON.stringify(q.stocks)])
+  } else {
+    await d.execute('DELETE FROM quick_profile WHERE id = 1')
+  }
 }
 
 async function syncRows<T extends { id: number }>(
