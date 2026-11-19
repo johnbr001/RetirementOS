@@ -3,20 +3,15 @@ import { emptyData, type AppData, type Person, type Holding, type Pension, type 
 
 const KEY = 'retirement-os-data-v1'
 let db: Database | null = null
+let desktopStoreLoaded = false
 export const isDesktop = '__TAURI_INTERNALS__' in window
 
-const schemas = [
-  'CREATE TABLE IF NOT EXISTS people (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, birthDate TEXT NOT NULL, retirementAge INTEGER NOT NULL, lifeExpectancy INTEGER NOT NULL, source TEXT NOT NULL, updatedAt TEXT NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, name TEXT NOT NULL, ticker TEXT, kind TEXT NOT NULL, quantity REAL NOT NULL, marketValue REAL NOT NULL, currency TEXT NOT NULL, annualDividend REAL NOT NULL, dividendFrequency TEXT NOT NULL, dividendGrowth REAL NOT NULL, taxRate REAL NOT NULL, source TEXT NOT NULL, valuationDate TEXT NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS pensions (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, kind TEXT NOT NULL, provider TEXT, balance REAL NOT NULL, monthlyContribution REAL NOT NULL, monthlyAmount REAL NOT NULL, startAge INTEGER NOT NULL, endAge INTEGER, basis TEXT NOT NULL, source TEXT NOT NULL, sourceUrl TEXT, updatedAt TEXT NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, monthlyAmount REAL NOT NULL, startAge INTEGER NOT NULL, endAge INTEGER NOT NULL, inflationLinked INTEGER NOT NULL, source TEXT NOT NULL, updatedAt TEXT NOT NULL)'
-]
+// Keep the SQLite URL and Tauri bundle identifier stable across releases.
+// The SQL plugin resolves this relative path inside Tauri's per-user app config directory.
+const DATABASE_URL = 'sqlite:retirement-os.db'
 
 async function database() {
-  if (!db) {
-    db = await Database.load('sqlite:retirement-os.db')
-    for (const schema of schemas) await db.execute(schema)
-  }
+  if (!db) db = await Database.load(DATABASE_URL)
   return db
 }
 
@@ -30,24 +25,33 @@ export async function loadData(): Promise<AppData> {
     d.select<Person[]>('SELECT * FROM people ORDER BY id'), d.select<Holding[]>('SELECT * FROM holdings ORDER BY id'),
     d.select<Pension[]>('SELECT * FROM pensions ORDER BY id'), d.select<Expense[]>('SELECT * FROM expenses ORDER BY id')
   ])
+  desktopStoreLoaded = true
   return { people, holdings, pensions, expenses }
 }
 
 export async function saveData(data: AppData) {
   if (!isDesktop) { localStorage.setItem(KEY, JSON.stringify(data)); return }
+  if (!desktopStoreLoaded) throw new Error('Database has not been loaded successfully; refusing to write.')
   const d = await database()
-  await d.execute('BEGIN IMMEDIATE')
-  try {
-    await d.execute('DELETE FROM people'); await d.execute('DELETE FROM holdings'); await d.execute('DELETE FROM pensions'); await d.execute('DELETE FROM expenses')
-    for (const p of data.people) await d.execute('INSERT INTO people (id,name,birthDate,retirementAge,lifeExpectancy,source,updatedAt) VALUES (?,?,?,?,?,?,?)', [p.id,p.name,p.birthDate,p.retirementAge,p.lifeExpectancy,p.source,p.updatedAt])
-    for (const h of data.holdings) await d.execute('INSERT INTO holdings (id,owner,name,ticker,kind,quantity,marketValue,currency,annualDividend,dividendFrequency,dividendGrowth,taxRate,source,valuationDate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [h.id,h.owner,h.name,h.ticker,h.kind,h.quantity,h.marketValue,h.currency,h.annualDividend,h.dividendFrequency,h.dividendGrowth,h.taxRate,h.source,h.valuationDate])
-    for (const p of data.pensions) await d.execute('INSERT INTO pensions (id,owner,kind,provider,balance,monthlyContribution,monthlyAmount,startAge,endAge,basis,source,sourceUrl,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [p.id,p.owner,p.kind,p.provider,p.balance,p.monthlyContribution,p.monthlyAmount,p.startAge,p.endAge,p.basis,p.source,p.sourceUrl,p.updatedAt])
-    for (const e of data.expenses) await d.execute('INSERT INTO expenses (id,label,monthlyAmount,startAge,endAge,inflationLinked,source,updatedAt) VALUES (?,?,?,?,?,?,?,?)', [e.id,e.label,e.monthlyAmount,e.startAge,e.endAge,e.inflationLinked?1:0,e.source,e.updatedAt])
-    await d.execute('COMMIT')
-  } catch (error) {
-    await d.execute('ROLLBACK')
-    throw error
-  }
+  // Each plugin call executes through a SQLx pool; do not span a SQL transaction
+  // across calls because the pool may use a different SQLite connection each time.
+  await syncRows(d, 'people', data.people, 'INSERT INTO people (id,name,birthDate,retirementAge,lifeExpectancy,source,updatedAt) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET name=excluded.name,birthDate=excluded.birthDate,retirementAge=excluded.retirementAge,lifeExpectancy=excluded.lifeExpectancy,source=excluded.source,updatedAt=excluded.updatedAt', p => [p.id,p.name,p.birthDate,p.retirementAge,p.lifeExpectancy,p.source,p.updatedAt])
+  await syncRows(d, 'holdings', data.holdings, 'INSERT INTO holdings (id,owner,name,ticker,kind,quantity,marketValue,currency,annualDividend,dividendFrequency,dividendGrowth,taxRate,source,valuationDate) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,name=excluded.name,ticker=excluded.ticker,kind=excluded.kind,quantity=excluded.quantity,marketValue=excluded.marketValue,currency=excluded.currency,annualDividend=excluded.annualDividend,dividendFrequency=excluded.dividendFrequency,dividendGrowth=excluded.dividendGrowth,taxRate=excluded.taxRate,source=excluded.source,valuationDate=excluded.valuationDate', h => [h.id,h.owner,h.name,h.ticker,h.kind,h.quantity,h.marketValue,h.currency,h.annualDividend,h.dividendFrequency,h.dividendGrowth,h.taxRate,h.source,h.valuationDate])
+  await syncRows(d, 'pensions', data.pensions, 'INSERT INTO pensions (id,owner,kind,provider,balance,monthlyContribution,monthlyAmount,startAge,endAge,basis,source,sourceUrl,updatedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,kind=excluded.kind,provider=excluded.provider,balance=excluded.balance,monthlyContribution=excluded.monthlyContribution,monthlyAmount=excluded.monthlyAmount,startAge=excluded.startAge,endAge=excluded.endAge,basis=excluded.basis,source=excluded.source,sourceUrl=excluded.sourceUrl,updatedAt=excluded.updatedAt', p => [p.id,p.owner,p.kind,p.provider,p.balance,p.monthlyContribution,p.monthlyAmount,p.startAge,p.endAge,p.basis,p.source,p.sourceUrl,p.updatedAt])
+  await syncRows(d, 'expenses', data.expenses, 'INSERT INTO expenses (id,label,monthlyAmount,startAge,endAge,inflationLinked,source,updatedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET label=excluded.label,monthlyAmount=excluded.monthlyAmount,startAge=excluded.startAge,endAge=excluded.endAge,inflationLinked=excluded.inflationLinked,source=excluded.source,updatedAt=excluded.updatedAt', e => [e.id,e.label,e.monthlyAmount,e.startAge,e.endAge,e.inflationLinked?1:0,e.source,e.updatedAt])
+}
+
+async function syncRows<T extends { id: number }>(
+  database: Database,
+  table: 'people' | 'holdings' | 'pensions' | 'expenses',
+  rows: T[],
+  upsert: string,
+  values: (row: T) => unknown[],
+) {
+  const stored = await database.select<{ id: number }[]>(`SELECT id FROM ${table}`)
+  const ids = new Set(rows.map(row => row.id))
+  for (const row of stored) if (!ids.has(row.id)) await database.execute(`DELETE FROM ${table} WHERE id = $1`, [row.id])
+  for (const row of rows) await database.execute(upsert, values(row))
 }
 
 export function downloadBackup(data: AppData) {

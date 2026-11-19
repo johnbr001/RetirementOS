@@ -1,33 +1,116 @@
 # Retirement OS
 
-Korean-first Windows desktop app for household retirement cash-flow planning. It stores personal financial inputs locally and never connects to financial institutions.
+한국 거주 개인과 부부를 위한 **Windows 은퇴 현금흐름 관리 데스크톱 앱**입니다. 사용자가 공식 조회 사이트에서 확인한 연금·자산 정보와 직접 입력한 가정을 한곳에 모아 은퇴 이후의 현금흐름을 살펴볼 수 있습니다.
 
-## Windows prerequisites
+> 현재 초기 개발 버전입니다. 금융기관 자동 연동이나 자동 로그인은 제공하지 않습니다. 계산 결과는 입력값에 따른 단순 추정이며, 투자·연금 수익을 보장하지 않습니다.
 
-- Node.js 20 or later
-- Rust toolchain (stable) with the MSVC target
-- Microsoft C++ Build Tools and WebView2 Runtime
+## 주요 기능
 
-## Run in development
+- 본인 및 배우자 프로필과 은퇴 목표 나이 관리
+- 주식·ETF·현금·기타 자산의 수량, 평가액, 기준일, 출처 기록
+- 배당 가정과 연금 수령액·수령 시작/종료 나이 기록
+- 은퇴 생활비와 적용 연령 구간 입력
+- CSV/XLSX 파일 미리보기, 필드 매핑, 중복 항목 확인 후 자산 가져오기
+- 물가상승률과 자산 수익률 가정을 반영한 연령별 현금흐름 추정
+- 현금흐름 CSV 내보내기와 JSON 백업 파일 생성
+- 국민연금공단, 금융감독원 통합연금포털, 한국주택금융공사, 미래에셋증권 공식 페이지 바로가기
+
+## Windows에서 실행하기
+
+### 필요한 프로그램
+
+- Node.js 20 이상
+- Rust 안정 버전 및 MSVC 대상 도구체인
+- Microsoft C++ Build Tools
+- Microsoft Edge WebView2 Runtime
+
+Rust 설치 중에는 Windows용 **MSVC** 도구체인을 선택하세요. 설치가 끝나면 PowerShell과 VS Code 터미널을 닫았다가 다시 열어 `cargo` 명령을 확인합니다.
 
 ```powershell
+cargo --version
+```
+
+`cargo`를 찾을 수 없다는 메시지가 나오면 Rust가 설치되지 않았거나 PATH 설정이 반영되지 않은 상태입니다. [Rust 설치 안내](https://rust-lang.org/tools/install/)와 [Tauri Windows 사전 요구사항](https://tauri.app/start/prerequisites/)을 참고하세요.
+
+### 개발 모드로 앱 실행
+
+PowerShell에서 프로젝트 폴더로 이동한 뒤 의존성을 설치하고 앱을 실행합니다.
+
+```powershell
+cd E:\Samsung\MyAsset
 npm install
 npm run tauri dev
 ```
 
-## Build Windows installers
+첫 실행에는 Rust와 JavaScript 의존성 다운로드 및 컴파일로 시간이 걸릴 수 있습니다.
+
+브라우저에서 UI만 확인하려면 다음 명령을 사용할 수 있습니다.
 
 ```powershell
-npm install
+npm run dev
+```
+
+브라우저 미리보기는 데스크톱 앱이 아니며, 화면에 미리보기 모드 안내가 표시됩니다.
+
+### Windows 설치 파일 만들기
+
+```powershell
 npm run tauri build
 ```
 
-The MSI and NSIS installers are written under `src-tauri/target/release/bundle/`. A Rust toolchain is needed for this final desktop packaging step.
+빌드가 완료되면 MSI 및 NSIS 설치 파일이 다음 폴더에 생성됩니다.
 
-## Data and privacy
+```text
+src-tauri\target\release\bundle\
+```
 
-Desktop mode stores data in the app's SQLite database. The browser preview uses browser-local storage and displays a mode banner. Do not enter account numbers, passwords, resident registration numbers, or authentication details. Official institution links open in the system browser; account lookup remains manual. No values are prefilled as sample financial data.
+## 데이터 저장과 개인정보
 
-## Current scope
+- 데스크톱 앱은 Tauri가 관리하는 사용자별 앱 설정 디렉터리에 `retirement-os.db` SQLite 데이터베이스를 사용합니다. 이 경로는 앱 버전 번호가 아니라 앱 식별자(`kr.retirementos.desktop`)와 파일명으로 정해지므로, 앱을 같은 제품으로 업데이트하면 데이터베이스 파일을 새 실행 파일로 덮어쓰지 않습니다. Tauri SQL 플러그인은 SQLite 경로를 앱 설정 디렉터리 기준으로 해석합니다.
+- 앱 업데이트 시 기존 데이터베이스를 그대로 열고, Tauri SQL 플러그인의 버전 관리 마이그레이션을 적용합니다. 마이그레이션과 버전 기록은 SQLite 트랜잭션으로 처리됩니다.
+- 저장할 때 전체 테이블을 비우고 다시 만드는 대신, 기존 행은 갱신하고 앱에서 사용자가 삭제한 항목만 삭제합니다.
+- 데이터베이스를 읽지 못하면 입력과 쓰기를 잠급니다. 빈 화면 상태가 기존 저장 데이터를 덮어쓰지 않도록 합니다.
+- 향후 앱 업데이트에서도 데이터 파일을 유지하려면 `identifier` 값(`src-tauri/tauri.conf.json`)과 데이터베이스 파일명(`src/core/store.ts`)을 변경하지 마세요. 스키마를 바꿀 때는 `src-tauri/src/lib.rs`에 새 버전 마이그레이션을 추가해야 합니다.
+- 브라우저 미리보기는 현재 브라우저의 로컬 저장소를 사용합니다.
+- 클라우드 동기화나 금융기관 데이터 전송 기능은 없습니다.
+- 금융기관 공식 페이지는 시스템 브라우저에서 열립니다. 로그인, 조회, 데이터 입력은 사용자가 직접 합니다.
+- 계좌번호, 비밀번호, 주민등록번호, 금융 인증 정보를 앱에 입력하거나 저장하지 마세요.
+- 백업 파일에는 입력한 금융 정보가 포함될 수 있으므로 안전한 위치에 보관하세요.
+- 앱을 업데이트하기 전에 설정 화면에서 JSON 백업을 만들어 두는 것을 권장합니다. JSON 백업 복원 기능은 아직 제공하지 않습니다.
 
-Profiles, holdings, dividend assumptions, pension records, living expenses, CSV/XLSX preview and mapped import, forecast chart/table, forecast CSV export, and JSON backup are included. Institution-specific import templates, backup restore, printable reports, expanded scenario comparison, and the packaged Windows installer remain follow-up work. Pension balances should not be entered twice (for example, once as a holding and again in a pension record).
+## 계산 결과 해석
+
+- 실제 자료가 입력되기 전까지 자산이나 연금 금액을 임의로 표시하지 않습니다.
+- 시뮬레이션은 입력한 생활비, 연금·배당, 물가상승률, 자산 수익률을 사용하는 단순 추정입니다.
+- 은퇴 시점, 수익률, 물가상승률 등 가정에 따라 결과가 달라집니다. 수익률, 배당, 연금액은 보장값이 아닙니다.
+- 세금, 수수료, 상품별 조건, 환율 변동 등은 충분히 반영되지 않을 수 있습니다. 공식 조회 결과와 앱의 추정값을 구분해 확인하세요.
+- 연금 금액은 사용자가 입력한 금액을 기준으로 계산합니다. 같은 연금 계좌 잔액을 자산과 연금 양쪽에 중복 등록하면 합계가 중복될 수 있습니다.
+- 해외 자산 평가액은 시뮬레이션에 사용할 KRW 환산액으로 입력하고, 통화 항목에는 원통화를 기록하세요. 환율을 자동으로 조회하지 않습니다.
+
+## 현재 범위와 미지원 항목
+
+현재는 초기 MVP 범위로 프로필, 자산, 배당 가정, 연금, 생활비 입력과 파일 가져오기 미리보기, 기본 시뮬레이션, CSV 내보내기, JSON 백업을 제공합니다.
+
+아직 지원하지 않는 기능:
+
+- 금융기관 API, 금융 마이데이터, 자동 로그인 및 웹 스크래핑
+- 기관별 파일 형식에 맞춘 가져오기 템플릿
+- JSON 백업 복원
+- 인쇄용 보고서와 시나리오 비교
+- 세금·수수료 및 상품별 연금 조건을 반영한 상세 계산
+- 배포용 Windows 설치 파일의 서명 및 자동 업데이트
+
+## 문제 해결
+
+### `cargo`를 찾을 수 없다고 나옵니다
+
+Rust가 설치되어 있는지 확인하고, 설치 후 터미널을 다시 열어 `cargo --version`을 실행하세요. 그래도 인식되지 않으면 `%USERPROFILE%\.cargo\bin`이 사용자 PATH에 있는지 확인하세요.
+
+### `icon.ico` 파일을 찾을 수 없다고 나옵니다
+
+Windows 앱 아이콘은 `src-tauri\icons\icon.ico`에 있어야 합니다. 저장소의 아이콘 파일이 존재하는지 확인한 뒤 다시 실행하세요.
+
+### 의존성 설치 또는 빌드 중 오류가 납니다
+
+네트워크 연결, Node.js 버전, Rust MSVC 도구체인, C++ Build Tools 설치 여부를 확인하세요. 오류가 계속되면 PowerShell에 표시된 오류 전체를 확인해야 원인을 좁힐 수 있습니다.
+

@@ -1,9 +1,20 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let migrations = vec![tauri_plugin_sql::Migration {
+        version: 1,
+        description: "create_initial_retirement_tables",
+        sql: include_str!("../migrations/001_initial.sql"),
+        kind: tauri_plugin_sql::MigrationKind::Up,
+    }];
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations("sqlite:retirement-os.db", migrations)
+                .build(),
+        )
         .run(tauri::generate_context!())
         .expect("error while running Retirement OS");
 }
